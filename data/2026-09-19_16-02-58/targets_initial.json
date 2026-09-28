@@ -1,0 +1,118 @@
+{
+  "source_image": "E:\\shiyanchengxu\\mubiaoshibie\\first_frame.png",
+  "original_template": "E:\\shiyanchengxu\\moban\\checkerboard_2x2_3cm.png",
+  "square_size_mm": 30.0,
+  "target_size_mm": 60.0,
+  "target_count": 1,
+  "targets": [
+    {
+      "id": 1,
+      "manual_roi_rect": [
+        2611,
+        2251,
+        470,
+        422
+      ],
+      "manual_roi_template_path": "E:\\shiyanchengxu\\mubiaoshibie\\initial_roi_templates\\target_001_manual_roi.png",
+      "initial_center": [
+        2802.65635696679,
+        2497.865275662785
+      ],
+      "current_center": [
+        2802.65635696679,
+        2497.865275662785
+      ],
+      "template_corners": [
+        [
+          2775.0,
+          2470.0
+        ],
+        [
+          2832.0,
+          2470.0
+        ],
+        [
+          2832.0,
+          2527.0
+        ],
+        [
+          2775.0,
+          2527.0
+        ]
+      ],
+      "displacement": [
+        0.0,
+        0.0
+      ],
+      "mm_per_pixel": 0.31022376068993734,
+      "scale_source": "manual_roi",
+      "corners": [
+        [
+          2711.283203125,
+          2396.5498046875
+        ],
+        [
+          2904.45068359375,
+          2406.2080078125
+        ],
+        [
+          2894.79248046875,
+          2599.37548828125
+        ],
+        [
+          2701.625,
+          2589.71728515625
+        ]
+      ],
+      "homography_pixel_to_mm": [
+        [
+          0.3098367240770124,
+          0.0154915620862201,
+          -877.1814057933141
+        ],
+        [
+          -0.015491562086219969,
+          0.30983672407701224,
+          -700.5371284972423
+        ],
+        [
+          -0.0,
+          -0.0,
+          1.0
+        ]
+      ],
+      "homography_mm_to_pixel": [
+        [
+          3.2194580078125,
+          -0.16097005208333334,
+          2711.283203125
+        ],
+        [
+          0.16097005208333334,
+          3.2194580078125,
+          2396.5498046875
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "lost": false,
+      "scaled_template": {
+        "template_scale": 0.16137005649717515,
+        "template_rotation": 90,
+        "template_size": [
+          57,
+          57
+        ],
+        "match_score": 0.9680688381195068
+      },
+      "center_method": "center_lines",
+      "displacement_mm": [
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

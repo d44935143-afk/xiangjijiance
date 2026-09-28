@@ -1,0 +1,1 @@
+host_time,camera_timestamp_ticks,camera_timestamp_ns,frame_index,target_id,tracking_status,tracking_score,scale_valid,mm_per_pixel,center_x_px,center_y_px,displacement_x_px,displacement_y_px,displacement_x_mm,displacement_y_mm

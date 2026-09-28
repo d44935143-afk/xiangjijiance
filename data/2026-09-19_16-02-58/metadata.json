@@ -1,0 +1,21 @@
+{
+  "camera_model": "a2A5328-15ucBAS",
+  "camera_serial": "40544430",
+  "camera_width_px": 5328,
+  "camera_height_px": 4608,
+  "camera_fps": 6.204474667129934,
+  "camera_timestamp_tick_frequency_hz": null,
+  "session_started_at": "2026-09-19 16:02:58.065",
+  "image_resolution": [
+    5328,
+    4608
+  ],
+  "target_size_mm": 60.0,
+  "target_count": 1,
+  "tracking_settings": {
+    "intrinsics_file": "E:\\shiyanchengxu\\biaoding\\camera_intrinsics.json",
+    "search_expand_factor": 2.5,
+    "local_match_threshold": 0.6,
+    "reacquire_threshold": 0.8
+  }
+}

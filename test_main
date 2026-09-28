@@ -1,0 +1,241 @@
+import argparse
+import sys
+import time
+from pathlib import Path
+
+from pypylon import pylon
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
+TRACKING_DIR = PROJECT_DIR / "mubiaogenzong"
+RECOGNITION_DIR = PROJECT_DIR / "mubiaoshibie"
+if str(TRACKING_DIR) not in sys.path:
+    sys.path.insert(0, str(TRACKING_DIR))
+if str(RECOGNITION_DIR) not in sys.path:
+    sys.path.insert(0, str(RECOGNITION_DIR))
+
+import continuous_tracking
+import image_template_match
+import monitor_display
+import tracking_data_logger
+
+
+DEFAULT_STATE_PATH = PROJECT_DIR / "targets_state.json"
+DEFAULT_SEARCH_EXPAND_FACTOR = 2.5
+DEFAULT_SAVE_INTERVAL = 1.0
+DEFAULT_TEMPLATE_PATH = PROJECT_DIR / "moban" / "checkerboard_2x2_3cm.png"
+DEFAULT_DATA_ROOT = PROJECT_DIR / "data"
+
+
+def open_camera():
+    camera = pylon.InstantCamera(
+        pylon.TlFactory.GetInstance().CreateFirstDevice()
+    )
+    camera.Open()
+
+    print("Camera:", camera.GetDeviceInfo().GetModelName())
+
+    converter = pylon.ImageFormatConverter()
+    converter.OutputPixelFormat = pylon.PixelType_BGR8packed
+    converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+
+    return camera, converter
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Camera monitoring program with target tracking and displacement.",
+    )
+    parser.add_argument(
+        "--state",
+        default=str(DEFAULT_STATE_PATH),
+        help=f"Initial target state JSON. Default: {DEFAULT_STATE_PATH}",
+    )
+    parser.add_argument(
+        "--search-expand-factor",
+        type=float,
+        default=DEFAULT_SEARCH_EXPAND_FACTOR,
+        help=f"Search range expansion factor. Default: {DEFAULT_SEARCH_EXPAND_FACTOR}",
+    )
+    parser.add_argument(
+        "--save-interval",
+        type=float,
+        default=DEFAULT_SAVE_INTERVAL,
+        help=f"Seconds between tracking-state saves. Default: {DEFAULT_SAVE_INTERVAL}",
+    )
+    parser.add_argument(
+        "--use-existing-state",
+        action="store_true",
+        help="Skip first-frame ROI initialization and use the existing state JSON.",
+    )
+    parser.add_argument(
+        "--init-targets",
+        action="store_true",
+        help="Use the first camera frame to manually select ROIs and initialize targets.",
+    )
+    parser.add_argument(
+        "--template",
+        default=str(DEFAULT_TEMPLATE_PATH),
+        help=f"Original template image path. Default: {DEFAULT_TEMPLATE_PATH}",
+    )
+    parser.add_argument(
+        "--corners-output",
+        default=str(RECOGNITION_DIR / "initial_corners_overlay.png"),
+        help="Corner overlay image path for initialization.",
+    )
+    parser.add_argument(
+        "--scales",
+        default=image_template_match.DEFAULT_TEMPLATE_SCALES,
+        help="Template scales to try during initialization, or auto.",
+    )
+    parser.add_argument(
+        "--scale-count",
+        type=int,
+        default=image_template_match.DEFAULT_SCALE_COUNT,
+        help="Number of auto scale candidates during initialization.",
+    )
+    parser.add_argument(
+        "--rotations",
+        default=image_template_match.DEFAULT_TEMPLATE_ROTATIONS,
+        help="Template rotations to try during initialization.",
+    )
+    parser.add_argument(
+        "--fallback-scale-rect-factor",
+        type=float,
+        default=image_template_match.DEFAULT_FALLBACK_SCALE_RECT_FACTOR,
+        help="Max expanded template-match rectangle factor for scale detection.",
+    )
+    parser.add_argument(
+        "--fallback-scale-rect-step",
+        type=float,
+        default=image_template_match.DEFAULT_FALLBACK_SCALE_RECT_STEP,
+        help="Expanded template-match rectangle step for scale detection.",
+    )
+    parser.add_argument(
+        "--data-root",
+        "--data-output",
+        dest="data_root",
+        default=str(DEFAULT_DATA_ROOT),
+        help=f"Root folder for monitoring sessions. Default: {DEFAULT_DATA_ROOT}",
+    )
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    init_from_first_frame = args.init_targets or not args.use_existing_state
+    state = None if init_from_first_frame else continuous_tracking.load_json(args.state)
+    if state is None and not init_from_first_frame:
+        return
+
+    data_logger = tracking_data_logger.TrackingDataLogger(args.data_root)
+    camera, converter = open_camera()
+    display = monitor_display.MonitorDisplay()
+
+    prev_frame = None
+    initialized = False
+    last_save_time = 0.0
+    frame_index = 0
+
+    try:
+        camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+
+        while camera.IsGrabbing():
+            grab_result = camera.RetrieveResult(
+                5000,
+                pylon.TimeoutHandling_ThrowException,
+            )
+
+            try:
+                if grab_result.GrabSucceeded():
+                    image = converter.Convert(grab_result)
+                    frame = image.GetArray()
+                    frame_index += 1
+
+                    if not initialized:
+                        if init_from_first_frame:
+                            state = image_template_match.initialize_targets_from_frame(
+                                frame=frame,
+                                state_path=args.state,
+                                template_path=args.template,
+                                corners_output_path=args.corners_output,
+                                scales_text=args.scales,
+                                scale_count=args.scale_count,
+                                rotations_text=args.rotations,
+                                fallback_scale_rect_factor=(
+                                    args.fallback_scale_rect_factor
+                                ),
+                                fallback_scale_rect_step=args.fallback_scale_rect_step,
+                                source_image_path="camera_first_frame",
+                            )
+                            if state is None:
+                                break
+                            continuous_tracking.initialize_first_frame(state, frame)
+                            continuous_tracking.save_json(args.state, state)
+                        else:
+                            continuous_tracking.initialize_first_frame(state, frame)
+
+                        prev_frame = frame.copy()
+                        initialized = True
+                        data_logger.initialize_session(
+                            state=state,
+                            camera=camera,
+                            frame_shape=frame.shape,
+                            settings={
+                                "intrinsics_file": str(
+                                    PROJECT_DIR / "biaoding" / "camera_intrinsics.json"
+                                ),
+                                "search_expand_factor": args.search_expand_factor,
+                                "local_match_threshold": (
+                                    continuous_tracking.DEFAULT_LOCAL_MATCH_SCORE_THRESHOLD
+                                ),
+                                "reacquire_threshold": (
+                                    continuous_tracking.DEFAULT_LOST_SCORE_THRESHOLD
+                                ),
+                            },
+                        )
+                        data_logger.log_state(
+                            state,
+                            frame_index,
+                        )
+                        display.show(frame, state)
+                        continue
+
+                    continuous_tracking.update_targets_between_frames(
+                        prev_frame=prev_frame,
+                        next_frame=frame,
+                        state=state,
+                        search_expand_factor=args.search_expand_factor,
+                        frame_index=frame_index,
+                    )
+
+                    data_logger.log_state(
+                        state,
+                        frame_index,
+                    )
+                    display.show(frame, state)
+
+                    now = time.time()
+                    if now - last_save_time >= args.save_interval:
+                        continuous_tracking.save_json(args.state, state)
+                        last_save_time = now
+
+                    prev_frame = frame.copy()
+            finally:
+                grab_result.Release()
+
+            if display.should_exit():
+                break
+
+    finally:
+        if camera.IsGrabbing():
+            camera.StopGrabbing()
+        if state is not None:
+            continuous_tracking.save_json(args.state, state)
+        camera.Close()
+        display.close()
+        data_logger.close()
+
+
+if __name__ == "__main__":
+    main()
