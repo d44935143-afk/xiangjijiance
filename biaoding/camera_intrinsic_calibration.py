@@ -7,7 +7,7 @@ import numpy as np
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_IMAGES_DIR = Path(r"C:\Users\Administrator\Desktop\biaodingshuju")
+DEFAULT_IMAGES_DIR = BASE_DIR / "biaodingshuju"
 DEFAULT_OUTPUT_PATH = BASE_DIR / "camera_intrinsics.json"
 DEFAULT_DEBUG_DIR = BASE_DIR / "intrinsic_debug"
 IMAGE_EXTENSIONS = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}

@@ -126,7 +126,14 @@ def main():
     if state is None:
         return
 
-    image = cv_imread(state.get("source_image"))
+    source_image = state.get("source_image")
+    if not source_image:
+        print("State has no source_image")
+        return
+    source_image = Path(source_image)
+    if not source_image.is_absolute():
+        source_image = Path(args.state).resolve().parent / source_image
+    image = cv_imread(source_image)
     if image is None:
         return
 

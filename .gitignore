@@ -1,0 +1,24 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.agents/
+.vscode/
+*.code-workspace
+
+# Local software and experimental output
+/class/
+/data/
+*.inspect.ndjson
+/buchang/.rmse_update/
+/buchang/*_plots/
+/buchang/gnss_y_covariance_analysis/
+/buchang/*.xlsx
+/buchang/*.csv
+/buchang/gnss_data/*.pos
+*.avi
+*.mp4

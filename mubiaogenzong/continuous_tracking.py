@@ -22,7 +22,7 @@ DEFAULT_STATE_PATH = PROJECT_DIR / "targets_state.json"
 DEFAULT_DEBUG_DIR = PROJECT_DIR / "mubiaogenzong" / "tracking_debug"
 IMAGE_EXTENSIONS = {".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 DEFAULT_EXCLUDED_NAME_PARTS = ("overlay", "boxes", "debug", "tracking")
-DEFAULT_TARGET_SIZE_MM = 60.0
+DEFAULT_TARGET_SIZE_MM = homography_scale_2x2.TARGET_SIZE_MM
 DEFAULT_LOST_SCORE_THRESHOLD = 0.8
 DEFAULT_LOCAL_MATCH_SCORE_THRESHOLD = 0.6
 DEFAULT_REACQUIRE_MAX_CANDIDATES = 30
@@ -30,6 +30,43 @@ DEFAULT_OCCUPIED_IOU_THRESHOLD = 0.2
 DEFAULT_SCALE_RECT_MAX_FACTOR = 4.0
 DEFAULT_SCALE_RECT_STEP = 0.11
 _INITIAL_TEMPLATE_CACHE = {}
+STATE_PATH_KEYS = ("source_image", "original_template")
+
+
+def resolve_state_paths(state, state_path):
+    """Resolve paths stored relative to the state file for runtime use."""
+    base = Path(state_path).resolve().parent
+    for key in STATE_PATH_KEYS:
+        value = state.get(key)
+        if value:
+            path = Path(value)
+            if not path.is_absolute():
+                state[key] = str(base / path)
+    for target in state.get("targets", []):
+        value = target.get("manual_roi_template_path")
+        if value:
+            path = Path(value)
+            if not path.is_absolute():
+                target["manual_roi_template_path"] = str(base / path)
+    return state
+
+
+def portable_state_paths(state, state_path):
+    """Store project files relative to the state file without changing runtime state."""
+    data = json.loads(json.dumps(state))
+    base = Path(state_path).resolve().parent
+    for record, key in [(data, key) for key in STATE_PATH_KEYS] + [
+        (target, "manual_roi_template_path") for target in data.get("targets", [])
+    ]:
+        value = record.get(key)
+        if value:
+            path = Path(value)
+            if path.is_absolute():
+                try:
+                    record[key] = path.relative_to(base).as_posix()
+                except ValueError:
+                    pass
+    return data
 
 
 def cv_imread(path):
@@ -61,7 +98,7 @@ def load_json(path):
         return None
 
     with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
+        return resolve_state_paths(json.load(file), path)
 
 
 def save_json(path, data):
@@ -69,7 +106,7 @@ def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
+        json.dump(portable_state_paths(data, path), file, ensure_ascii=False, indent=2)
 
 
 def list_image_frames(frames_dir, frame_pattern, exclude_generated=True):
@@ -814,7 +851,11 @@ def update_center_from_frame(frame, target):
 
 
 def draw_tracking(frame, targets, frame_name):
-    output = frame.copy()
+    output = center_calculation.draw_center_debug(
+        frame,
+        {"targets": [target for target in targets if not target.get("lost", False)]},
+        report_failures=False,
+    )
 
     for target in targets:
         color = (0, 255, 0) if not target.get("lost", False) else (0, 0, 255)
@@ -828,15 +869,8 @@ def draw_tracking(frame, targets, frame_name):
 
         if center is not None:
             cx, cy = [int(round(value)) for value in center]
-            cv2.drawMarker(
-                output,
-                (cx, cy),
-                color,
-                cv2.MARKER_CROSS,
-                20,
-                2,
-                cv2.LINE_AA,
-            )
+            if 0 <= cx < output.shape[1] and 0 <= cy < output.shape[0]:
+                output[cy, cx] = color
             cv2.putText(
                 output,
                 f"ID{target_id} S={target.get('tracking_score', 0):.2f}",

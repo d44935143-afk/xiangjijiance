@@ -11,7 +11,7 @@ import homography_scale_2x2
 BASE_DIR = Path(__file__).resolve().parent
 
 # Initial frame image. If no image is passed on the command line, this is used.
-DEFAULT_IMAGE_PATH = BASE_DIR / "1.jpg"
+DEFAULT_IMAGE_PATH = BASE_DIR / "C:/Users/Administrator/Desktop/xiangce" / "1.jpg"
 
 # Manual target-state JSON is saved next to test_main in the project root.
 DEFAULT_STATE_PATH = BASE_DIR.parent / "targets_state.json"
@@ -165,7 +165,7 @@ def select_target_rects(image):
 
         for index, rect in enumerate(rects, start=1):
             x, y, w, h = rect
-            cv2.rectangle(view, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.rectangle(view, (x, y), (x + w, y + h), (0, 255, 0), 10)
             cv2.putText(
                 view,
                 f"ID{index}",
@@ -180,7 +180,7 @@ def select_target_rects(image):
         if drawing["active"] and drawing["start"] and drawing["current"]:
             x0, y0 = drawing["start"]
             x1, y1 = drawing["current"]
-            cv2.rectangle(view, (x0, y0), (x1, y1), (0, 255, 255), 1)
+            cv2.rectangle(view, (x0, y0), (x1, y1), (0, 255, 255), 10)
 
         return view
 
@@ -208,13 +208,27 @@ def select_target_rects(image):
             drawing["start"] = None
             drawing["current"] = None
 
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 1200, 700)
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    height, width = image.shape[:2]
+    scale = min(1200 / width, 700 / height, 1.0)
+    cv2.resizeWindow(
+        window_name,
+        max(1, round(width * scale)),
+        max(1, round(height * scale)),
+    )
     cv2.setMouseCallback(window_name, on_mouse)
 
     while True:
         cv2.imshow(window_name, draw_view())
         key = cv2.waitKey(20) & 0xFF
+        try:
+            window_closed = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1
+        except cv2.error:
+            window_closed = True
+        if window_closed:
+            drawing["cancelled"] = True
+            rects.clear()
+            break
 
         if key in (13, 32):
             break
@@ -225,8 +239,11 @@ def select_target_rects(image):
         if key == ord("u") and rects:
             rects.pop()
 
-    cv2.setMouseCallback(window_name, lambda *args: None)
-    cv2.destroyWindow(window_name)
+    try:
+        cv2.setMouseCallback(window_name, lambda *args: None)
+        cv2.destroyWindow(window_name)
+    except cv2.error:
+        pass  # The user may already have closed the window.
 
     return rects
 
@@ -551,9 +568,21 @@ def save_initial_targets(
             f"expand_factor={None if scale_result is None else scale_result.get('expand_factor')}"
         )
 
+    def state_file_path(value):
+        path = Path(value)
+        try:
+            return path.resolve().relative_to(state_path.resolve().parent).as_posix()
+        except ValueError:
+            return str(path)
+
+    for target in targets:
+        value = target.get("manual_roi_template_path")
+        if value:
+            target["manual_roi_template_path"] = state_file_path(value)
+
     state = {
-        "source_image": str(Path(source_image_path)),
-        "original_template": str(Path(template_path)),
+        "source_image": state_file_path(source_image_path),
+        "original_template": state_file_path(template_path),
         "square_size_mm": SQUARE_SIZE_MM,
         "target_size_mm": TARGET_SIZE_MM,
         "target_count": len(targets),
@@ -565,9 +594,7 @@ def save_initial_targets(
 
     print("Initial target state saved:", state_path)
 
-    corner_overlay = draw_corner_overlay(image, target_overlays)
-    if cv_imwrite(corners_output_path, corner_overlay):
-        print("Corner overlay saved:", Path(corners_output_path))
+    # Keep the source image free of recognition annotations.
 
     return state
 
@@ -649,7 +676,7 @@ def build_parser():
     parser.add_argument(
         "--corners-output",
         default=str(DEFAULT_CORNERS_OUTPUT_PATH),
-        help=f"Corner overlay image path. Default: {DEFAULT_CORNERS_OUTPUT_PATH}",
+        help="Reserved for compatibility; annotated source images are not generated.",
     )
     parser.add_argument(
         "--template",

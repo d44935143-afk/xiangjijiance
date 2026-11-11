@@ -1,133 +1,133 @@
 {
-  "source_image": "E:\\shiyanchengxu\\mubiaoshibie\\first_frame.png",
-  "original_template": "E:\\shiyanchengxu\\moban\\checkerboard_2x2_3cm.png",
-  "square_size_mm": 30.0,
-  "target_size_mm": 60.0,
+  "source_image": "mubiaoshibie/first_frame.png",
+  "original_template": "moban/checkerboard_2x2_3cm.png",
+  "square_size_mm": 10.0,
+  "target_size_mm": 20.0,
   "target_count": 1,
   "targets": [
     {
       "id": 1,
       "manual_roi_rect": [
-        2646,
-        2284,
-        315,
-        336
+        1710,
+        1941,
+        229,
+        240
       ],
-      "manual_roi_template_path": "E:\\shiyanchengxu\\mubiaoshibie\\initial_roi_templates\\target_001_manual_roi.png",
+      "manual_roi_template_path": "mubiaoshibie/initial_roi_templates/target_001_manual_roi.png",
       "initial_center": [
-        2802.4657202974568,
-        2497.3486778663196
+        1815.4639271280244,
+        2064.8834634223754
       ],
       "current_center": [
-        2803.00427337314,
-        2497.5959984654573
+        1815.540841774943,
+        2065.019542598009
       ],
       "template_corners": [
         [
-          2756.0,
-          2451.0
+          1800.0,
+          2049.0
         ],
         [
-          2851.0,
-          2451.0
+          1833.0,
+          2049.0
         ],
         [
-          2851.0,
-          2546.0
+          1833.0,
+          2082.0
         ],
         [
-          2756.0,
-          2546.0
+          1800.0,
+          2082.0
         ]
       ],
       "displacement": [
-        0.5385530756834669,
-        0.24732059913776538
+        0.07691464691856709,
+        0.1360791756337676
       ],
-      "mm_per_pixel": 0.31078305548052054,
+      "mm_per_pixel": 0.1050062952144013,
       "scale_source": "current_match_center_initial_roi_size",
       "corners": [
         [
-          2712.90185546875,
-          2395.322021484375
+          1728.5362548828125,
+          1962.3155517578125
         ],
         [
-          2905.58642578125,
-          2407.36474609375
+          1918.3431396484375,
+          1978.1328125
         ],
         [
-          2893.543701171875,
-          2600.049560546875
+          1902.52587890625,
+          2167.939697265625
         ],
         [
-          2700.85888671875,
-          2588.0068359375
+          1712.718994140625,
+          2152.122314453125
         ]
       ],
       "homography_pixel_to_mm": [
         [
-          0.31018222314854627,
-          0.019386659144808766,
-          -887.931220285685
+          0.10464434352845113,
+          0.008720378785668255,
+          -197.99367656567512
         ],
         [
-          -0.019386292126481772,
-          0.3101822460870466,
-          -690.3932568451967
+          -0.008720373680156,
+          0.10464434956223956,
+          -190.271752487288
         ],
         [
-          -8.155908929835239e-10,
-          6.4992871364039165e-09,
+          3.3185773141791143e-09,
+          5.56967169163395e-10,
           1.0
         ]
       ],
       "homography_mm_to_pixel": [
         [
-          3.2114133251689156,
-          -0.20077295911618562,
-          2712.90185546875
+          9.490282976595342,
+          -0.790867595080013,
+          1728.5362548828125
         ],
         [
-          0.20071524177393188,
-          3.211359134809423,
-          2395.322021484375
+          0.7907998660598378,
+          9.49033240743358,
+          1962.3155517578125
         ],
         [
-          1.3146952043576625e-09,
-          -2.103526541737466e-08,
+          -3.193468564802881e-08,
+          -2.6612484497557787e-09,
           1.0
         ]
       ],
       "lost": false,
       "scaled_template": {
-        "template_scale": 0.26953860640301314,
-        "template_rotation": 90,
+        "template_scale": 0.013971210838272649,
+        "template_rotation": 0,
         "template_size": [
-          95,
-          95
+          33,
+          33
         ],
-        "match_score": 0.9651167988777161
+        "match_score": 0.9590780138969421
       },
       "center_method": "center_lines",
       "displacement_mm": [
-        0.16737317039933985,
-        0.07686305148330771
+        0.008076522120642497,
+        0.014289170089131765
       ],
       "reacquire_score": null,
       "reacquire_distance_px": null,
       "scale_rect": [
-        2646,
-        2330,
-        315,
-        336
+        1702,
+        1946,
+        229,
+        240
       ],
       "scale_expand_factor": null,
       "scale_updated": true,
       "scale_update_reason": null,
       "lost_reason": null,
-      "tracking_score": 0.9668275713920593
+      "tracking_score": 0.9604927897453308
     }
   ],
-  "frame_index": 72,
-  "last_update_time": "2026-09-19 16:20:17"
+  "frame_index": 1726,
+  "last_update_time": "2026-11-11 16:30:00"
 }

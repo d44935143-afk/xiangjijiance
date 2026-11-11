@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw
 
 DPI = 300
 CM_TO_INCH = 1 / 2.54
-TARGET_SIZE_CM = 3
+TARGET_SIZE_CM = 2
 GRID_SIZE = 2
 
 

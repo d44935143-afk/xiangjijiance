@@ -8,7 +8,7 @@ import numpy as np
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_STATE_PATH = PROJECT_DIR / "targets_state.json"
-DEFAULT_OUTPUT_PATH = PROJECT_DIR / "mubiaogenzong" / "center_debug.png"
+DEFAULT_OUTPUT_PATH = PROJECT_DIR / "C:/Users/Administrator/Desktop/xiangce" / "1.jpg"
 
 
 def line_intersection(p1, p2, p3, p4):
@@ -300,45 +300,26 @@ def update_state_centers(state, frame=None):
     return state
 
 
-def draw_center_debug(frame, state):
-    """Draw fitted centers and stored template corners on the source frame."""
+def draw_center_debug(frame, state, report_failures=True):
+    """Draw the actual fitted lines, clipped to each ROI, at one-pixel thickness."""
     output = frame.copy()
-
     for target in state.get("targets", []):
-        target_id = target.get("id", "?")
-        corners = target.get("template_corners")
-        center = target.get("current_center")
-
-        if corners is not None and len(corners) == 4:
-            points = np.asarray(corners, dtype=np.int32)
-            cv2.polylines(output, [points], True, (0, 255, 0), 2, cv2.LINE_AA)
-
-        if center is None:
+        _, debug = center_from_template_frame(frame, target.get("template_corners"))
+        if debug is None:
+            if report_failures:
+                print(f"ID{target.get('id')}: line fitting failed; no lines drawn")
             continue
-
-        cx, cy = [int(round(value)) for value in center]
-        cv2.drawMarker(
-            output,
-            (cx, cy),
-            (0, 0, 255),
-            cv2.MARKER_CROSS,
-            24,
-            2,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            output,
-            f"ID{target_id} {target.get('center_method')}",
-            (cx + 8, max(24, cy - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (0, 0, 255),
-            2,
-            cv2.LINE_AA,
-        )
-
+        rx, ry, rw, rh = debug["roi_rect"]
+        for key, color in (("vertical_line", (0, 0, 255)),
+                           ("horizontal_line", (0, 255, 0))):
+            p1, p2 = debug[key]
+            p1 = tuple(int(round(v)) for v in p1)
+            p2 = tuple(int(round(v)) for v in p2)
+            visible, a, b = cv2.clipLine((0, 0, rw, rh), p1, p2)
+            if visible:
+                cv2.line(output, (a[0] + rx, a[1] + ry),
+                         (b[0] + rx, b[1] + ry), color, 1, cv2.LINE_8)
     return output
-
 
 def load_state(state_path):
     state_path = Path(state_path)
@@ -378,7 +359,7 @@ def build_parser():
     parser.add_argument(
         "--debug-output",
         default=str(DEFAULT_OUTPUT_PATH),
-        help=f"Debug image path. Default: {DEFAULT_OUTPUT_PATH}",
+        help="Output image with one-pixel fitted lines (use PNG for lossless output).",
     )
     return parser
 
@@ -390,6 +371,10 @@ def main():
         return
 
     image_path = args.image or state.get("source_image")
+    if image_path is not None and not args.image:
+        image_path = Path(image_path)
+        if not image_path.is_absolute():
+            image_path = Path(args.state).resolve().parent / image_path
     frame = cv_imread(image_path) if image_path is not None else None
 
     update_state_centers(state, frame=frame)
@@ -407,9 +392,13 @@ def main():
         print("State saved:", Path(args.state))
 
     if frame is not None and args.debug_output:
+        output_path = Path(args.debug_output)
+        if image_path is not None and output_path.resolve() == Path(image_path).resolve():
+            raise ValueError("Debug output must differ from the source image")
         debug_image = draw_center_debug(frame, state)
-        if cv_imwrite(args.debug_output, debug_image):
-            print("Debug image saved:", Path(args.debug_output))
+        if not cv_imwrite(output_path, debug_image):
+            raise RuntimeError(f"Cannot save fitted-line image: {output_path}")
+        print("Fitted-line image saved:", output_path)
 
 
 if __name__ == "__main__":

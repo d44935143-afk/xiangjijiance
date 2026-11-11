@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 
 
-# One small checker square is 3 cm. The detected homography corners are the
-# outer four corners of the full 2x2 target, so the real side length is 6 cm.
-SQUARE_SIZE_MM = 30.0
+# One small checker square is 1 cm. The detected homography corners are the
+# outer four corners of the full 2x2 target, so the real side length is 2 cm.
+SQUARE_SIZE_MM = 10.0
 TARGET_SIZE_MM = SQUARE_SIZE_MM * 2.0
 
 
