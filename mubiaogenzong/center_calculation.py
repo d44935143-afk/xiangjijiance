@@ -5,6 +5,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from gradient_localization import gradient_edge_points, robust_line
+
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_STATE_PATH = PROJECT_DIR / "targets_state.json"
@@ -115,11 +117,11 @@ def rect_from_corners(corners):
     return x1, y1, x2 - x1, y2 - y1
 
 
-def adaptive_binary_from_roi(roi):
+def adaptive_binary_from_roi(roi, return_stages=False):
     """Normalize local brightness and binarize one target crop."""
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-    equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(gray)
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    equalized = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4)).apply(blurred)
     binary = cv2.adaptiveThreshold(
         equalized,
         255,
@@ -128,6 +130,8 @@ def adaptive_binary_from_roi(roi):
         21,
         3,
     )
+    if return_stages:
+        return {"gray": gray, "blurred": blurred, "equalized": equalized, "binary": binary}
     return binary
 
 
@@ -186,7 +190,7 @@ def center_from_template_frame(
     template_corners,
     margin_ratio=0.35,
 ):
-    """Compute center by fitting two black-white center boundary lines."""
+    """Compute subpixel center from grayscale gradient peaks and robust fitted lines."""
     rect = rect_from_corners(template_corners)
     if rect is None:
         return None, None
@@ -199,12 +203,15 @@ def center_from_template_frame(
 
     rx, ry, rw, rh = clipped
     roi = frame[ry:ry + rh, rx:rx + rw]
-    binary = adaptive_binary_from_roi(roi)
-
-    vertical_points = center_band_edge_points(binary, vertical=True)
-    horizontal_points = center_band_edge_points(binary, vertical=False)
-    vertical_line = fit_line_from_points(vertical_points)
-    horizontal_line = fit_line_from_points(horizontal_points)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if roi.ndim == 3 else roi
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3, scale=1 / 8)
+    gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3, scale=1 / 8)
+    local_rect = (x - rx, y - ry, w, h)
+    vertical_points = gradient_edge_points(gx, local_rect, vertical=True)
+    horizontal_points = gradient_edge_points(gy, local_rect, vertical=False)
+    vertical_line = robust_line(vertical_points)
+    horizontal_line = robust_line(horizontal_points)
 
     if vertical_line is None or horizontal_line is None:
         return None, None
@@ -221,7 +228,10 @@ def center_from_template_frame(
     center = [center_local[0] + rx, center_local[1] + ry]
     debug = {
         "roi_rect": [rx, ry, rw, rh],
-        "binary": binary,
+        "gray": gray,
+        "blurred": blurred,
+        "gradient_x": gx,
+        "gradient_y": gy,
         "vertical_line": vertical_line,
         "horizontal_line": horizontal_line,
         "vertical_points": vertical_points,
