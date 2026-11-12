@@ -1,10 +1,10 @@
 {
   "folders": [
     {
-      "path": "F:\\shiyanchengxu"
+      "path": "."
     }
   ],
   "settings": {
-    "python.defaultInterpreterPath": "E:\\Anaconda3\\envs\\xiangjibuchang\\python.exe"
+    "python.defaultInterpreterPath": "D:\\coda\\envs\\shyancehngx\\python.exe"
   }
 }
