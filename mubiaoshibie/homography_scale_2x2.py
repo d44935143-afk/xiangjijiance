@@ -21,17 +21,14 @@ def to_gray(image):
 
 
 def order_corners(points):
-    """Order four points as top-left, top-right, bottom-right, bottom-left."""
+    """Order corners clockwise in image coordinates from the upper-left side."""
     points = np.asarray(points, dtype=np.float32)
-    ordered = np.zeros((4, 2), dtype=np.float32)
-    point_sum = points.sum(axis=1)
-    point_diff = np.diff(points, axis=1).reshape(-1)
-
-    ordered[0] = points[np.argmin(point_sum)]
-    ordered[2] = points[np.argmax(point_sum)]
-    ordered[1] = points[np.argmin(point_diff)]
-    ordered[3] = points[np.argmax(point_diff)]
-    return ordered
+    offsets = points - points.mean(axis=0)
+    angles = np.arctan2(offsets[:, 1], offsets[:, 0])
+    ordered = points[np.argsort(angles)]
+    # Break x+y ties by choosing the uppermost point, regardless of input order.
+    start = np.lexsort((ordered[:, 0], ordered[:, 1], ordered.sum(axis=1)))[0]
+    return np.roll(ordered, -int(start), axis=0)
 
 
 def normalize_vector(vector):
