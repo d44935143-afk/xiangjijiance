@@ -310,11 +310,14 @@ def update_state_centers(state, frame=None):
     return state
 
 
-def draw_center_debug(frame, state, report_failures=True):
+def draw_center_debug(frame, state, report_failures=True, *, use_cached_fit=False):
     """Draw the actual fitted lines, clipped to each ROI, at one-pixel thickness."""
     output = frame.copy()
     for target in state.get("targets", []):
-        _, debug = center_from_template_frame(frame, target.get("template_corners"))
+        if use_cached_fit:
+            debug = target.get("fitted_line_overlay")
+        else:
+            _, debug = center_from_template_frame(frame, target.get("template_corners"))
         if debug is None:
             if report_failures:
                 print(f"ID{target.get('id')}: line fitting failed; no lines drawn")

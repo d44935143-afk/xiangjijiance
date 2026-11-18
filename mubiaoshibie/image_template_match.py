@@ -11,7 +11,7 @@ import homography_scale_2x2
 BASE_DIR = Path(__file__).resolve().parent
 
 # Initial frame image. If no image is passed on the command line, this is used.
-DEFAULT_IMAGE_PATH = BASE_DIR / "C:/Users/Administrator/Desktop/xiangce" / "1.jpg"
+DEFAULT_IMAGE_PATH = BASE_DIR / "C:/Users/Administrator/Desktop/xiangce" / "4.png"
 
 # Manual target-state JSON is saved next to test_main in the project root.
 DEFAULT_STATE_PATH = BASE_DIR.parent / "targets_state.json"
@@ -676,7 +676,7 @@ def build_parser():
     parser.add_argument(
         "--corners-output",
         default=str(DEFAULT_CORNERS_OUTPUT_PATH),
-        help="Reserved for compatibility; annotated source images are not generated.",
+        help="Standalone calibration result image with corners and measurement information.",
     )
     parser.add_argument(
         "--template",
@@ -725,8 +725,73 @@ def build_parser():
     return parser
 
 
+def show_calibration_result(image, state, output_path):
+    """Preview standalone image calibration with readable corner coordinates."""
+    height, width = image.shape[:2]
+    scale = min(900 / width, 800 / height, 1.0)
+    preview = cv2.resize(image, (max(1, round(width * scale)),
+                                 max(1, round(height * scale))))
+    lines = [f"Target size: {state['target_size_mm']:g} mm",
+             "Red: measured corners | Green: boundary", ""]
+    for target in state.get("targets", []):
+        target_id = target['id']
+        score = target.get('scaled_template', {}).get('match_score')
+        lines.append(f"ID{target_id}  score: {score:.4f}" if score is not None else f"ID{target_id}")
+        ratio = target.get('mm_per_pixel')
+        lines.append(f"Scale: {ratio:.8f} mm/px" if ratio is not None else "Scale: unavailable")
+        corners = target.get('corners')
+        if corners is None:
+            lines.append("Corners: detection failed")
+        else:
+            points = np.round(np.asarray(corners) * scale).astype(np.int32)
+            cv2.polylines(preview, [points], True, (0, 255, 0), 1, cv2.LINE_8)
+            for index, (point, pixel) in enumerate(zip(corners, points), start=1):
+                px, py = [int(v) for v in pixel]
+                cv2.drawMarker(preview, (px, py), (0, 0, 255), cv2.MARKER_CROSS, 9, 1)
+                cv2.putText(preview, f"{target_id}:C{index}", (px + 5, max(12, py - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1, cv2.LINE_AA)
+                lines.append(f"C{index}: ({point[0]:.3f}, {point[1]:.3f}) px")
+        location = target.get('initial_center')
+        if location is not None:
+            lines.append(f"Initial center: ({location[0]:.3f}, {location[1]:.3f})")
+        lines.append("")
+    canvas = np.full((max(preview.shape[0], 35 + 24 * len(lines)),
+                      preview.shape[1] + 530, 3), 30, dtype=np.uint8)
+    canvas[:preview.shape[0], :preview.shape[1]] = preview
+    for i, line in enumerate(lines):
+        cv2.putText(canvas, line, (preview.shape[1] + 12, 28 + 24 * i),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, (240, 240, 240), 1, cv2.LINE_AA)
+    if output_path:
+        if not cv_imwrite(output_path, canvas):
+            raise RuntimeError(f"Cannot save calibration result: {output_path}")
+        print("Calibration result saved:", output_path)
+    window = "Image calibration result - any key to close"
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    scale = min(1400 / canvas.shape[1], 850 / canvas.shape[0], 1.0)
+    cv2.resizeWindow(window, round(canvas.shape[1] * scale), round(canvas.shape[0] * scale))
+    cv2.imshow(window, canvas)
+    try:
+        while True:
+            if cv2.waitKey(30) >= 0:
+                break
+            try:
+                if cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except cv2.error:
+                break
+    finally:
+        try:
+            cv2.destroyWindow(window)
+        except cv2.error:
+            pass
+
+
 def main():
     args = build_parser().parse_args()
+    from datetime import datetime
+    debug_dir = BASE_DIR.parent / "data" / datetime.now().strftime("calibration_debug_%Y-%m-%d_%H-%M-%S_%f")
+    homography_scale_2x2.DEBUG_OUTPUT_DIR = debug_dir
+    print("Corner detection debug folder:", debug_dir)
 
     image = cv_imread(args.image)
     if image is None:
@@ -756,7 +821,7 @@ def main():
         print("No target was selected.")
         return
 
-    save_initial_targets(
+    state = save_initial_targets(
         image=image,
         rects=rects,
         state_path=args.state,
@@ -770,6 +835,11 @@ def main():
         fallback_scale_rect_factor=args.fallback_scale_rect_factor,
         fallback_scale_rect_step=args.fallback_scale_rect_step,
     )
+
+
+    if Path(args.corners_output).resolve() == Path(args.image).resolve():
+        raise ValueError("Calibration result path must differ from the source image")
+    show_calibration_result(image, state, args.corners_output)
 
 
 if __name__ == "__main__":

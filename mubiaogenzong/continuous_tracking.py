@@ -836,11 +836,28 @@ def update_targets_between_frames(
 
 def update_center_from_frame(frame, target):
     """Use center-line fitting in the current frame, with corner center fallback."""
-    center, _ = center_calculation.center_from_template_frame(
+    center, debug = center_calculation.center_from_template_frame(
         frame,
         target.get("template_corners"),
     )
-    if center is not None:
+    target["fitted_lines"] = {}
+    target["fitted_line_overlay"] = None
+    if debug is not None:
+        target["fitted_line_overlay"] = {
+            key: debug[key] for key in ("roi_rect", "vertical_line", "horizontal_line")
+        }
+    if center is not None and debug is not None:
+        rx, ry = debug["roi_rect"][:2]
+        for name in ("vertical", "horizontal"):
+            p1, p2 = np.asarray(debug[name + "_line"], dtype=np.float64)
+            a, b = p1[1] - p2[1], p2[0] - p1[0]
+            length = float(np.hypot(a, b))
+            if length > 1e-9:
+                a, b = float(a / length), float(b / length)
+                c = float(-a * (p1[0] + rx) - b * (p1[1] + ry))
+                if a < 0 or (abs(a) < 1e-12 and b < 0):
+                    a, b, c = -a, -b, -c
+                target["fitted_lines"][name] = [a, b, c]
         return center, "center_lines"
 
     center = center_calculation.center_from_corners(target.get("template_corners"))
@@ -855,6 +872,7 @@ def draw_tracking(frame, targets, frame_name):
         frame,
         {"targets": [target for target in targets if not target.get("lost", False)]},
         report_failures=False,
+        use_cached_fit=True,
     )
 
     for target in targets:

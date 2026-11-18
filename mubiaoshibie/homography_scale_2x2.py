@@ -1,11 +1,16 @@
+import json
+from pathlib import Path
+
 import cv2
 import numpy as np
 
 
 # One small checker square is 1 cm. The detected homography corners are the
 # outer four corners of the full 2x2 target, so the real side length is 2 cm.
-SQUARE_SIZE_MM = 10.0
+SQUARE_SIZE_MM = 55.0
 TARGET_SIZE_MM = SQUARE_SIZE_MM * 2.0
+DEBUG_OUTPUT_DIR = None
+_DEBUG_ATTEMPT = 0
 
 
 def to_gray(image):
@@ -53,12 +58,131 @@ def clip_rect(rect, image_shape, margin=0):
     return x1, y1, x2 - x1, y2 - y1
 
 
+def fit_square_edges(contour, coarse_box):
+    """Fit contour sides robustly; return None when edge support is insufficient."""
+    points = contour.reshape(-1, 2).astype(np.float32)
+    box = order_corners(coarse_box)
+    lines = []
+    supports = []
+    for i in range(4):
+        a, b = box[i], box[(i + 1) % 4]
+        direction = b - a
+        length = float(np.linalg.norm(direction))
+        if length < 6:
+            return None
+        direction /= length
+        normal = np.array([-direction[1], direction[0]])
+        offset = points - a
+        along = offset @ direction
+        distance = np.abs(offset @ normal)
+        selected = points[(along > length * 0.12) & (along < length * 0.88)
+                          & (distance < max(2.0, length * 0.25))]
+        if len(selected) < 6:
+            return None
+        for _ in range(3):
+            vx, vy, x0, y0 = cv2.fitLine(selected, cv2.DIST_HUBER, 0, .01, .01).reshape(-1)
+            residual = np.abs((selected[:, 0] - x0) * vy - (selected[:, 1] - y0) * vx)
+            threshold = max(1.0, 2.5 * float(np.median(residual)))
+            keep = selected[residual <= threshold]
+            if len(keep) < 6:
+                return None
+            selected = keep
+        vx, vy, x0, y0 = cv2.fitLine(selected, cv2.DIST_HUBER, 0, .01, .01).reshape(-1)
+        if abs(float(np.dot([vx, vy], direction))) < .94:
+            return None
+        if np.ptp(selected @ direction) < length * .4:
+            return None
+        lines.append((np.array([x0, y0]), np.array([vx, vy])))
+        supports.append(int(len(selected)))
+    corners = []
+    for i in range(4):
+        a, u = lines[(i - 1) % 4]
+        b, v = lines[i]
+        matrix = np.column_stack((u, -v))
+        if abs(np.linalg.det(matrix)) < .1:
+            return None
+        point = a + np.linalg.solve(matrix, b - a)[0] * u
+        if not np.isfinite(point).all():
+            return None
+        corners.append(point)
+    fitted = np.asarray(corners, np.float32)
+    if not cv2.isContourConvex(fitted.reshape(-1, 1, 2)):
+        return None
+    if np.max(np.linalg.norm(fitted - box, axis=1)) > np.max(np.linalg.norm(np.roll(box, -1, axis=0)-box,axis=1)) * .35:
+        return None
+    return fitted, supports
+
+
+def refine_gray_corners(gray, box):
+    """Refine each corner using two short grayscale edge segments beside it."""
+    smooth = cv2.GaussianBlur(gray, (3, 3), 0).astype(np.float32)
+    output = box.copy()
+    diagnostics = []
+    for i in range(4):
+        origin = box[i]
+        lines = []
+        edge_points = []
+        for neighbor in ((i - 1) % 4, (i + 1) % 4):
+            vector = box[neighbor] - origin
+            length = float(np.linalg.norm(vector))
+            if length < 12:
+                break
+            u = vector / length
+            n = np.array([-u[1], u[0]], np.float32)
+            radius = max(3, min(10, int(round(length * .1))))
+            offsets = np.arange(-radius, radius + 1, dtype=np.float32)
+            points = []
+            # Stay away from the corner itself and the midpoint/crossing.
+            for along in np.linspace(length * .12, length * .48, max(8, int(length * .36))):
+                base = origin + u * along
+                samples = (base[None, :] + offsets[:, None] * n).astype(np.float32)
+                if (samples[:, 0].min() < 1 or samples[:, 1].min() < 1 or
+                        samples[:, 0].max() >= gray.shape[1]-1 or samples[:, 1].max() >= gray.shape[0]-1):
+                    continue
+                profile = cv2.remap(smooth, samples[:,0].reshape(1,-1),
+                                    samples[:,1].reshape(1,-1), cv2.INTER_LINEAR).ravel()
+                gradient = np.abs(np.gradient(profile))
+                peak = int(np.argmax(gradient))
+                if peak == 0 or peak == len(offsets)-1 or gradient[peak] < 5:
+                    continue
+                a,b,c = [float(v) for v in gradient[peak-1:peak+2]]
+                denominator = a-2*b+c
+                delta = np.clip(.5*(a-c)/denominator, -.5, .5) if denominator < -1e-8 else 0
+                points.append(base + n * (offsets[peak] + delta))
+            if len(points) < 6:
+                break
+            points = np.asarray(points, np.float32)
+            vx,vy,x0,y0 = cv2.fitLine(points, cv2.DIST_HUBER, 0,.01,.01).ravel()
+            residual = np.abs((points[:,0]-x0)*vy-(points[:,1]-y0)*vx)
+            points = points[residual <= max(.75,2.5*float(np.median(residual)))]
+            if len(points)<6 or np.ptp(points @ u)<length*.2:
+                break
+            vx,vy,x0,y0 = cv2.fitLine(points, cv2.DIST_HUBER, 0,.01,.01).ravel()
+            if abs(float(np.dot([vx,vy],u)))<.97:
+                break
+            lines.append((np.array([x0,y0]),np.array([vx,vy])))
+            edge_points.append(points.tolist())
+        accepted = False
+        if len(lines)==2:
+            a,u=lines[0]; b,v=lines[1]; matrix=np.column_stack((u,-v))
+            if abs(np.linalg.det(matrix))>.2:
+                point=a+np.linalg.solve(matrix,b-a)[0]*u
+                limit=.15*min(np.linalg.norm(box[(i-1)%4]-origin),np.linalg.norm(box[(i+1)%4]-origin))
+                if np.isfinite(point).all() and np.linalg.norm(point-origin)<=limit:
+                    output[i]=point
+                    accepted=True
+        diagnostics.append({'corner':i+1,'accepted':accepted,'edge_points_roi':edge_points})
+    if not cv2.isContourConvex(output.reshape(-1,1,2)):
+        return box.copy(), [{'accepted':False,'reason':'invalid_refined_polygon'}]
+    return output, diagnostics
+
+
 def black_square_candidates(binary, upscale):
     """Find separate black-square candidates in the selected ROI."""
     contours, _ = cv2.findContours(
         binary,
         cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
+        cv2.CHAIN_APPROX_NONE,
     )
 
     image_area = binary.shape[0] * binary.shape[1]
@@ -84,16 +208,24 @@ def black_square_candidates(binary, upscale):
             continue
 
         box = cv2.boxPoints(rect).astype(np.float32) / float(upscale)
-        ordered_box = order_corners(box)
+        coarse_box = order_corners(box)
+        refined = fit_square_edges(contour.astype(np.float32) / float(upscale), coarse_box)
+        if refined is None:
+            continue  # Do not accept the protrusion-contaminated coarse rectangle.
+        ordered_box = refined[0]
         center = ordered_box.mean(axis=0)
-        side = float((width + height) * 0.5 / float(upscale))
+        side = float(np.mean(np.linalg.norm(np.roll(ordered_box, -1, axis=0) - ordered_box, axis=1)))
 
         candidates.append(
             {
                 "box": ordered_box,
+                "coarse_box": coarse_box,
+                "edge_fit_success": refined is not None,
+                "edge_support_counts": refined[1] if refined is not None else [],
                 "center": center,
                 "side": side,
                 "area": float(area),
+                "contour": contour.astype(np.float32) / float(upscale),
             }
         )
 
@@ -181,13 +313,78 @@ def detect_2x2_corners_in_roi(image, roi_rect, roi_margin=0):
         cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
     )
 
+    raw_binary = binary.copy()
+    # Remove narrow protrusions/connections before extracting the side contours.
+    # Opening preserves long straight edges when the kernel fits inside the square.
+    kernel_size = max(3, int(round(min(w, h) * upscale * 0.10)) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
     candidates = black_square_candidates(binary, upscale)
     if len(candidates) < 2:
         candidates = separated_black_square_candidates(binary, upscale)
 
+    # Refine the two adjacent sides of every candidate corner in original grayscale.
+    original_gray = to_gray(roi)
+    for item in candidates:
+        item['before_gray_refinement'] = item['box'].copy()
+        item['box'], item['corner_refinement'] = refine_gray_corners(original_gray, item['box'])
+        item['center'] = item['box'].mean(axis=0)
+        item['side'] = float(np.mean(np.linalg.norm(np.roll(item['box'],-1,axis=0)-item['box'],axis=1)))
+
+    def save_debug(pair=None, score=None):
+        if DEBUG_OUTPUT_DIR is None:
+            return
+        global _DEBUG_ATTEMPT
+        _DEBUG_ATTEMPT += 1
+        folder = Path(DEBUG_OUTPUT_DIR) / f"attempt_{_DEBUG_ATTEMPT:04d}"
+        folder.mkdir(parents=True, exist_ok=True)
+        def write(name, picture):
+            ok, data = cv2.imencode(".png", picture)
+            if not ok:
+                raise RuntimeError(f"Cannot encode debug image: {name}")
+            data.tofile(str(folder / name))
+        view = cv2.resize(roi, (binary.shape[1], binary.shape[0]))
+        candidate_view = view.copy()
+        for index, item in enumerate(candidates):
+            contour = np.round(item['contour'] * upscale).astype(np.int32)
+            coarse = np.round(item['coarse_box'] * upscale).astype(np.int32)
+            cv2.polylines(candidate_view, [coarse], True, (255, 0, 0), 1)
+            box = np.round(item['box'] * upscale).astype(np.int32)
+            cv2.drawContours(candidate_view, [contour], -1, (0, 255, 0), 1)
+            cv2.polylines(candidate_view, [box], True, (0, 255, 255), 1)
+            at = tuple(np.round(item['center'] * upscale).astype(int))
+            cv2.putText(candidate_view, str(index), at, cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 0, 255), 1)
+        selected_view = view.copy()
+        if pair is not None:
+            for index, color in zip(pair, ((0, 0, 255), (0, 255, 0))):
+                box = np.round(candidates[index]['box'] * upscale).astype(np.int32)
+                cv2.polylines(selected_view, [box], True, color, 1)
+                at = tuple(box[0].astype(int))
+                cv2.putText(selected_view, str(index), at, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        write('01_roi.png', view)
+        write('02_raw_binary.png', raw_binary)
+        write('02_binary.png', binary)
+        write('02_removed_protrusions.png', cv2.subtract(raw_binary, binary))
+        write('03_candidates.png', candidate_view)
+        write('04_selected_pair.png', selected_view)
+        refined_view = view.copy()
+        for item in candidates:
+            for key, color in (('before_gray_refinement', (255,0,0)), ('box', (0,255,255))):
+                polygon = np.round(item[key]*upscale).astype(np.int32)
+                cv2.polylines(refined_view, [polygon], True, color, 1)
+        write('05_corner_refinement.png', refined_view)
+        info = {'opening_kernel': kernel_size, 'roi_rect': [x,y,w,h], 'upscale': upscale, 'selected_indices': pair,
+                'pair_score': score, 'candidates': [
+                    {key: value.tolist() if isinstance(value, np.ndarray) else value
+                     for key, value in item.items()} for item in candidates]}
+        (folder / 'details.json').write_text(json.dumps(info, indent=2), encoding='utf-8')
+
     if len(candidates) < 2:
+        save_debug()
         return None
 
+    best_pair = None
     best_corners = None
     best_score = None
 
@@ -213,7 +410,9 @@ def detect_2x2_corners_in_roi(image, roi_rect, roi_margin=0):
             if best_score is None or score < best_score:
                 best_score = score
                 best_corners = corners
+                best_pair = [i, j]
 
+    save_debug(best_pair, best_score)
     if best_corners is None:
         return None
 

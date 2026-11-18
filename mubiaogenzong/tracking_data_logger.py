@@ -12,10 +12,6 @@ FIELDNAMES = [
     "frame_index",
     "target_id",
     "tracking_status",
-    "sample_count",
-    "valid_frame_count",
-    "scale_valid_frame_count",
-    "lost_frame_count",
     "min_tracking_score",
     "mm_per_pixel",
     "center_x_px",
@@ -25,8 +21,15 @@ FIELDNAMES = [
     "displacement_x_mm",
     "displacement_y_mm",
     "displacement_x_std_mm",
-    "displacement_y_std_mm",
 ]
+
+LINE_FIELDS = [f"{axis}_line_{coefficient}" for axis in ("vertical", "horizontal")
+               for coefficient in ("a", "b", "c")]
+FIELDNAMES += ["line_frame_index"] + LINE_FIELDS
+
+
+CSV_LABELS = {"window_start":"\u7a97\u53e3\u5f00\u59cb\u65f6\u95f4","window_end":"\u7a97\u53e3\u7ed3\u675f\u65f6\u95f4","frame_index":"\u7d2f\u8ba1\u5904\u7406\u5e27\u53f7","target_id":"\u9776\u6807\u7f16\u53f7","tracking_status":"\u8ddf\u8e2a\u72b6\u6001","min_tracking_score":"\u6700\u4f4e\u5339\u914d\u5206\u6570","mm_per_pixel":"\u6bd4\u4f8b\u5c3a\uff08\u6beb\u7c73\u6bcf\u50cf\u7d20\uff09","center_x_px":"\u4e2d\u5fc3X\u5750\u6807\uff08\u50cf\u7d20\uff09","center_y_px":"\u4e2d\u5fc3Y\u5750\u6807\uff08\u50cf\u7d20\uff09","displacement_x_px":"X\u4f4d\u79fb\uff08\u50cf\u7d20\uff09","displacement_y_px":"Y\u4f4d\u79fb\uff08\u50cf\u7d20\uff09","displacement_x_mm":"X\u4f4d\u79fb\uff08\u6beb\u7c73\uff09","displacement_y_mm":"Y\u4f4d\u79fb\uff08\u6beb\u7c73\uff09","displacement_x_std_mm":"X\u4f4d\u79fb\u6807\u51c6\u5dee\uff08\u6beb\u7c73\uff09","line_frame_index":"\u76f4\u7ebf\u62df\u5408\u5e27\u53f7","vertical_line_a":"\u8fd1\u7ad6\u76f4\u7ebf\u7cfb\u6570a","vertical_line_b":"\u8fd1\u7ad6\u76f4\u7ebf\u7cfb\u6570b","vertical_line_c":"\u8fd1\u7ad6\u76f4\u7ebf\u7cfb\u6570c","horizontal_line_a":"\u8fd1\u6c34\u5e73\u7ebf\u7cfb\u6570a","horizontal_line_b":"\u8fd1\u6c34\u5e73\u7ebf\u7cfb\u6570b","horizontal_line_c":"\u8fd1\u6c34\u5e73\u7ebf\u7cfb\u6570c"}
+STATUS_LABELS = {"tracked":"\u6b63\u5e38\u8ddf\u8e2a","lost":"\u4e22\u5931","partial":"\u90e8\u5206\u4e22\u5931","reacquired":"\u91cd\u65b0\u6355\u83b7"}
 
 
 def pair_values(value):
@@ -112,8 +115,8 @@ class TrackingDataLogger:
         self.window_start_text = self.started_at.isoformat(
             sep=" ", timespec="milliseconds"
         )
-        self.file = open(self.output_path, "w", newline="", encoding="utf-8")
-        self.writer = csv.DictWriter(self.file, fieldnames=FIELDNAMES)
+        self.file = open(self.output_path, "w", newline="", encoding="utf-8-sig")
+        self.writer = csv.DictWriter(self.file, fieldnames=[CSV_LABELS[key] for key in FIELDNAMES])
         self.writer.writeheader()
         self.file.flush()
 
@@ -163,6 +166,7 @@ class TrackingDataLogger:
         )
         self.samples.setdefault(target_id, []).append(
             {
+                "fitted_lines": {k: list(v) for k, v in target.get("fitted_lines", {}).items()},
                 "host_time": host_time,
                 "frame_index": int(frame_index),
                 "lost": bool(target.get("lost", False)),
@@ -208,10 +212,6 @@ class TrackingDataLogger:
             "frame_index": latest["frame_index"],
             "target_id": target_id,
             "tracking_status": status,
-            "sample_count": len(samples),
-            "valid_frame_count": len(valid_samples),
-            "scale_valid_frame_count": len(scale_samples),
-            "lost_frame_count": lost_count,
             "min_tracking_score": "" if not scores else min(scores),
             "mm_per_pixel": median(
                 [sample["mm_per_pixel"] for sample in scale_samples]
@@ -237,11 +237,19 @@ class TrackingDataLogger:
             "displacement_x_std_mm": standard_deviation(
                 [sample["displacement_x_mm"] for sample in valid_samples]
             ),
-            "displacement_y_std_mm": standard_deviation(
-                [sample["displacement_y_mm"] for sample in valid_samples]
-            ),
         }
-        self.writer.writerow(row)
+        line_sample = valid_samples[-1] if valid_samples else None
+        fits = line_sample.get("fitted_lines", {}) if line_sample else {}
+        row["line_frame_index"] = line_sample["frame_index"] if fits else ""
+        for axis in ("vertical", "horizontal"):
+            values = fits.get(axis, ["", "", ""])
+            for coefficient, value in zip(("a", "b", "c"), values):
+                row[f"{axis}_line_{coefficient}"] = value
+        # Format only at export; preserve full precision in tracking calculations.
+        row = {key: f"{value:.2f}" if isinstance(value, float) else value
+               for key, value in row.items()}
+        row["tracking_status"] = STATUS_LABELS[row["tracking_status"]]
+        self.writer.writerow({CSV_LABELS[key]: value for key, value in row.items()})
 
     def flush_window(self, window_end=None):
         if not self.samples:
